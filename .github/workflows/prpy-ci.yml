@@ -1,0 +1,71 @@
+name: PRPY CI
+
+on:
+  push:
+    branches:
+    - deployment
+  pull_request:
+    branches:
+    - deployment
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      CI: "true"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.19.0
+        run_install: false
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "24.16.0"
+        cache: pnpm
+        cache-dependency-path: pnpm-lock.yaml
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: Validate dependency catalog
+      run: pnpm run check:catalog
+
+    - name: Build
+      run: pnpm run build
+
+    - name: Typecheck tests
+      run: pnpm run typecheck:test
+
+    - name: Lint
+      run: pnpm run lint
+
+    - name: Test
+      run: pnpm run test
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: reports/junit.xml
+        if-no-files-found: ignore
+        retention-days: 14
