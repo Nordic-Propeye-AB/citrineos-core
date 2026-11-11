@@ -117,6 +117,7 @@
       "title": "Sign in to your account",
       "description": "Enter your credentials to access the dashboard",
       "signin": "Sign in",
+      "signInWithEntra": "Sign in with Microsoft",
       "signingIn": "Signing in...",
       "signup": "Sign up",
       "divider": "or",

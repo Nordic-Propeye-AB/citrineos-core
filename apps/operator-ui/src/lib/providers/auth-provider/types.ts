@@ -4,6 +4,6 @@
 
 import { z } from 'zod';
 
-export const AuthProviderTypeEnum = z.enum(['keycloak', 'generic']);
+export const AuthProviderTypeEnum = z.enum(['keycloak', 'generic', 'entra']);
 
 export type AuthProviderType = z.infer<typeof AuthProviderTypeEnum>;

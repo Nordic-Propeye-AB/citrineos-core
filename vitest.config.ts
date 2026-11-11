@@ -10,6 +10,7 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 // Mirror TypeScript path aliases for testing (point to source files, not built files).
 // tsconfig.test.base.json mirrors this map for the typechecker; the two must stay in sync.
 const alias = {
+  '@lib': r('./apps/operator-ui/src/lib'),
   '@': r('./packages/ocpp/src'),
   '@test': r('./packages/ocpp/test'),
   '@dal': r('./packages/dal/src'),

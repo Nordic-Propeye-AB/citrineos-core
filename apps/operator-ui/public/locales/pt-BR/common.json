@@ -117,6 +117,7 @@
       "title": "Entre na sua conta",
       "description": "Insira suas credenciais para acessar o painel",
       "signin": "Entrar",
+      "signInWithEntra": "Entrar com a Microsoft",
       "signingIn": "Entrando...",
       "signup": "Cadastrar-se",
       "divider": "ou",

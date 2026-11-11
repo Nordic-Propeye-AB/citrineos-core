@@ -5,6 +5,7 @@
 import { getToken } from 'next-auth/jwt';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { readPublicRuntimeConfig } from './lib/utils/runtime-config';
 
 /**
  * Server-side authentication middleware.
@@ -18,23 +19,26 @@ import { NextResponse } from 'next/server';
  * Next.js internal paths / static assets (see matcher below).
  */
 export async function middleware(request: NextRequest) {
+  const provider = readPublicRuntimeConfig(process.env).authProvider;
   const token = await getToken({
     req: request,
     secret: process.env.NEXTAUTH_SECRET,
   });
 
   // skip server side auth for generic auth provider
-  if (
-    !process.env.NEXT_PUBLIC_AUTH_PROVIDER ||
-    process.env.NEXT_PUBLIC_AUTH_PROVIDER === 'generic'
-  ) {
+  if (provider === 'generic') {
     return NextResponse.next();
   }
 
   // No valid session — redirect to login
-  if (!token) {
+  if (
+    !token ||
+    (provider === 'entra' &&
+      (token.authProvider !== 'entra' || !token.accessToken || !token.roles?.length))
+  ) {
     console.debug('No token found, redirecting to /login');
     const loginUrl = new URL('/login', request.url);
+
     return NextResponse.redirect(loginUrl);
   }
 
@@ -42,6 +46,7 @@ export async function middleware(request: NextRequest) {
   if (token.error === 'RefreshAccessTokenError') {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('error', 'SessionExpired');
+
     return NextResponse.redirect(loginUrl);
   }
 
