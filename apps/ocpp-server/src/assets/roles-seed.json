@@ -2,6 +2,7 @@
   "admin": {
     "resources": {
       "Locations": ["list", "show", "create", "edit", "delete"],
+      "NetworkAlerts": ["list", "show"],
       "ChargingStations": [
         "access:configuration",
         "access:ocpp-messages",
@@ -98,6 +99,7 @@
   "user": {
     "resources": {
       "Locations": ["create", "edit", "list", "show"],
+      "NetworkAlerts": ["list", "show"],
       "ChargingStations": [
         "access:configuration",
         "access:ocpp-messages",
