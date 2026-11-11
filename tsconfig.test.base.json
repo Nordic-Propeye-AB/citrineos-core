@@ -10,6 +10,8 @@
     // Bare specifiers are listed alongside the wildcards because vite's
     // prefix aliases match them but TypeScript's `paths` patterns do not.
     "paths": {
+      "@lib": ["./apps/operator-ui/src/lib"],
+      "@lib/*": ["./apps/operator-ui/src/lib/*"],
       "@": ["./packages/ocpp/src"],
       "@/*": ["./packages/ocpp/src/*"],
       "@test": ["./packages/ocpp/test"],

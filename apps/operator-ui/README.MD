@@ -56,6 +56,7 @@ full stack (server + UI + Hasura) together, see the [root README](../../README.m
   - [Start the Charging Station (EVerest)](#start-the-charging-station-everest)
 - [Usage](#usage)
 - [Signing In Locally --- localDev mode](#signing-in-locally----localdev-mode)
+- [Microsoft Entra ID](#microsoft-entra-id)
 - [Hasura Authentication](#hasura-authentication)
 - [Related Documentation](#related-documentation)
 - [Contributing](#contributing)
@@ -413,6 +414,78 @@ exactly as it would against a real provider.
 
 Core generates a fresh signing key each time it starts, which invalidates any token from a previous run. The
 first page load after restarting the stack returns you to the login page.
+
+## Microsoft Entra ID
+
+Set `NEXT_PUBLIC_AUTH_PROVIDER=entra` to use the native NextAuth Microsoft provider. Keycloak and
+local credentials remain available with `keycloak` and `generic`. Entra mode requires a specific
+tenant, assigned API roles, and a delegated CitrineOS API scope; it does not accept Microsoft Graph
+tokens or enable local login as a fallback.
+
+### Register the applications
+
+1. Create a **single-tenant API registration**. Set its Application ID URI to `api://<api-client-id>`
+   and expose a delegated scope named `access_as_user`. Set the API's `api.requestedAccessTokenVersion`
+   to `2`. Define app roles with values matching Core's role definitions, initially `admin` and `user`.
+   Allow **Users/Groups** for interactive access; allow **Applications** on roles intended for service
+   clients. Assign authorized operators or groups to these roles on the API's enterprise application.
+2. Create a separate **single-tenant Web application registration** for the UI. Register
+   `https://charge.example.com/api/auth/callback/azure-ad` and `https://charge.example.com/login` as
+   Web redirect URIs. The second URI is the post-logout destination. Create a client secret and store
+   its value in the deployment secret store. Add the API's delegated `access_as_user` permission and
+   grant administrator consent. No Microsoft Graph permission is needed by this integration.
+3. Set **Assignment required** on the UI enterprise application and assign the permitted operators
+   or groups. Configure Conditional Access for the UI and API resources to require MFA for interactive
+   users. Confirm the policy is enabled and inspect a real sign-in's Conditional Access results;
+   application configuration alone does not enforce or prove the tenant's MFA policy.
+4. For noninteractive clients, create a separate confidential client, grant its approved API application
+   role, and grant administrator consent. Obtain client-credentials tokens using
+   `scope=api://<api-client-id>/.default`. These clients call the API directly; they do not use UI
+   sessions or the UI's delegated-token verifier.
+
+See Microsoft's documentation for [API scopes](https://learn.microsoft.com/entra/identity-platform/quickstart-configure-app-expose-web-apis),
+[app roles](https://learn.microsoft.com/entra/identity-platform/howto-add-app-roles-in-apps), and
+[sign-out redirect URIs](https://learn.microsoft.com/entra/identity-platform/v2-protocols-oidc#send-a-sign-out-request).
+
+### Configure the running UI container
+
+```dotenv
+NEXT_PUBLIC_AUTH_PROVIDER=entra
+NEXTAUTH_URL=https://charge.example.com
+NEXTAUTH_SECRET=<stable-random-session-secret>
+ENTRA_TENANT_ID=<directory-tenant-guid>
+ENTRA_CLIENT_ID=<ui-client-guid>
+ENTRA_CLIENT_SECRET=<ui-client-secret>
+ENTRA_API_AUDIENCE=<api-client-guid>
+ENTRA_API_SCOPE=api://<api-client-guid>/access_as_user
+ENTRA_ALLOWED_ROLES=admin,user
+NEXT_PUBLIC_TENANT_ID=1
+NEXT_PUBLIC_API_URL=https://charge-api.example.com/v1/graphql
+NEXT_PUBLIC_WS_URL=wss://charge-api.example.com/v1/graphql
+NEXT_PUBLIC_CITRINE_CORE_URL=https://charge-api.example.com
+```
+
+Provider selection, API/GraphQL/WebSocket URLs, CitrineOS tenant ID, and the public Keycloak URL
+are read at container startup and delivered to the browser through an explicit public allowlist.
+They can change without rebuilding the image. Other `NEXT_PUBLIC_*` settings retain Next.js's
+build-time behavior. Restart the container and reload browser tabs after changing settings.
+The client secret, refresh token, and `NEXTAUTH_SECRET` are never included in public configuration
+or the browser session. Keep the session secret stable across restarts and instances.
+
+Access tokens are verified against the tenant's signing keys, v2 issuer, API audience, expiry,
+assigned roles, and delegated scope. Tokens refresh before expiry; a failed refresh clears access
+and refresh tokens and requires a new sign-in. Signing out clears the UI session and redirects to
+Entra's logout endpoint. The UI does not fetch Graph profile photos using the API access token.
+
+`NEXT_PUBLIC_TENANT_ID` is the numeric **CitrineOS** tenant, not the Entra directory GUID. This
+integration binds one UI deployment to that CitrineOS tenant. Configure Core with JWT mode, the
+same Entra issuer/JWKS and API audience, `roles` as the role claim, and its corresponding tenant
+binding. Configure Hasura JWT claims mapping for the same API tokens and CitrineOS tenant;
+keep the admin secret and metadata endpoints internal. Do not use `HASURA_ADMIN_SECRET` in the UI.
+
+Validate login, unauthorized-user denial, MFA results, refresh/revocation, logout, REST commands,
+GraphQL queries/subscriptions, and client-credentials requests in the configured tenant before
+public deployment. Local tests use signed fixtures and do not substitute for these live checks.
 
 ## Hasura Authentication
 

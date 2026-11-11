@@ -3,6 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type AuthProviderType, AuthProviderTypeEnum } from '@lib/providers/auth-provider/types';
+import { readPublicRuntimeConfig } from './runtime-config';
+
+const runtimeConfig =
+  typeof window === 'undefined'
+    ? readPublicRuntimeConfig(process.env)
+    : window.__CITRINE_PUBLIC_CONFIG__;
 
 const getConfig: () => {
   appName: string;
@@ -41,8 +47,9 @@ const getConfig: () => {
   helpVideoUrl?: string;
   allowImageUpload: boolean;
 } = () => {
-  const authProviderResult = AuthProviderTypeEnum.safeParse(process.env.NEXT_PUBLIC_AUTH_PROVIDER);
-  const authProvider = authProviderResult.success ? authProviderResult.data : 'generic';
+  const authProvider = AuthProviderTypeEnum.parse(
+    runtimeConfig?.authProvider || process.env.NEXT_PUBLIC_AUTH_PROVIDER || 'generic',
+  );
 
   return {
     appName: process.env.NEXT_PUBLIC_APP_NAME || 'CitrineOS',
@@ -62,16 +69,20 @@ const getConfig: () => {
       : -98.583333, // Approximate center of contiguous USA
     hasuraAdminSecret: process.env.HASURA_ADMIN_SECRET,
     hasuraClaim: process.env.NEXT_PUBLIC_HASURA_CLAIM || 'https://hasura.io/jwt/claims',
-    tenantId: process.env.NEXT_PUBLIC_TENANT_ID || '1',
-    apiUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090/v1/graphql',
-    wsUrl: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8090/v1/graphql',
-    citrineCoreUrl: process.env.NEXT_PUBLIC_CITRINE_CORE_URL,
+    tenantId: runtimeConfig?.tenantId || process.env.NEXT_PUBLIC_TENANT_ID || '1',
+    apiUrl:
+      runtimeConfig?.apiUrl ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      'http://localhost:8090/v1/graphql',
+    wsUrl:
+      runtimeConfig?.wsUrl || process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8090/v1/graphql',
+    citrineCoreUrl: runtimeConfig?.citrineCoreUrl || process.env.NEXT_PUBLIC_CITRINE_CORE_URL,
     fileServer: process.env.NEXT_PUBLIC_FILE_SERVER_URL,
     logoUrl: process.env.NEXT_PUBLIC_LOGO_URL,
     adminEmail: process.env.NEXT_PUBLIC_ADMIN_EMAIL,
     adminPassword: process.env.ADMIN_PASSWORD,
     authProvider,
-    keycloakUrl: process.env.NEXT_PUBLIC_KEYCLOAK_URL,
+    keycloakUrl: runtimeConfig?.keycloakUrl || process.env.NEXT_PUBLIC_KEYCLOAK_URL,
     keycloakServerUrl: process.env.KEYCLOAK_SERVER_URL,
     keycloakRealm: process.env.KEYCLOAK_REALM,
     keycloakClientId: process.env.KEYCLOAK_CLIENT_ID,

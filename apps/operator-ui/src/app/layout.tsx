@@ -12,6 +12,8 @@ import { cookies } from 'next/headers';
 import React from 'react';
 import './globals.css';
 import { NuqsAdapter } from 'nuqs/adapters/next/app';
+import Script from 'next/script';
+import { serializePublicRuntimeConfig } from '@lib/utils/runtime-config';
 
 const roobertFont = localFont({
   src: [
@@ -73,6 +75,9 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} className={roobertFont.variable} suppressHydrationWarning>
+      <Script id="citrine-runtime-config" strategy="beforeInteractive">
+        {`window.__CITRINE_PUBLIC_CONFIG__=${serializePublicRuntimeConfig(process.env)};`}
+      </Script>
       <body>
         <NextIntlClientProvider locale={locale} messages={{ ...fallbackMessages, ...messages }}>
           <NuqsAdapter>

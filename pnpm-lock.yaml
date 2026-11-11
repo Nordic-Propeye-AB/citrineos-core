@@ -656,6 +656,9 @@ importers:
       graphql-tag:
         specifier: 2.12.7
         version: 2.12.7(graphql@15.6.1)
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       js-cookie:
         specifier: 3.0.8
         version: 3.0.8

@@ -36,19 +36,32 @@
  */
 
 import type { AuthOptions } from 'next-auth';
+import type { JWT } from 'next-auth/jwt';
 import KeycloakProvider from 'next-auth/providers/keycloak';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import config from '@lib/utils/config';
 import { parseJwt } from '@lib/utils/jwt';
 import { genericAdminUser } from '@lib/providers/auth-provider/generic-auth-provider';
+import {
+  createEntraProvider,
+  entraLogoutUrl,
+  readEntraConfiguration,
+  refreshEntraAccessToken,
+  verifyEntraAccessToken,
+} from '@lib/server/auth/entra';
 
 const keycloakServerUrl = config.keycloakServerUrl || config.keycloakUrl;
 const authProvider = config.authProvider;
+const entraConfiguration =
+  authProvider === 'entra' ? readEntraConfiguration(process.env) : undefined;
 
 /**
  * Refreshes an expired access token using the refresh token
  */
-async function refreshAccessToken(token: any) {
+async function refreshAccessToken(token: JWT): Promise<JWT> {
+  if (entraConfiguration) {
+    return refreshEntraAccessToken(token, entraConfiguration);
+  }
   if (authProvider === 'generic') {
     return token;
   }
@@ -65,7 +78,7 @@ async function refreshAccessToken(token: any) {
         client_id: config.keycloakClientId!,
         client_secret: config.keycloakClientSecret!,
         grant_type: 'refresh_token',
-        refresh_token: token.refreshToken,
+        refresh_token: token.refreshToken || '',
       }),
     });
 
@@ -101,6 +114,9 @@ async function refreshAccessToken(token: any) {
  * Defaults to Generic Auth Provider if Keycloak is not configured.
  */
 const getProvider = () => {
+  if (entraConfiguration) {
+    return createEntraProvider(entraConfiguration);
+  }
   if (authProvider === 'keycloak') {
     return KeycloakProvider({
       clientId: config.keycloakClientId!,
@@ -140,26 +156,59 @@ const authOptions: AuthOptions = {
   providers: [getProvider()],
   events: {},
   callbacks: {
+    async signIn({ account }) {
+      if (!entraConfiguration) {
+        return true;
+      }
+      if (account?.provider !== 'azure-ad' || !account.access_token || !account.refresh_token) {
+        return false;
+      }
+      try {
+        await verifyEntraAccessToken(account.access_token, entraConfiguration);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     async redirect({ url, baseUrl }) {
-      // Redirect to overview page after successful login
-      // If the url is the callback from Keycloak or the signin page, redirect to overview
-      if (url.startsWith(baseUrl)) {
-        // Check if it's a callback or sign-in, redirect to overview
-        if (url.includes('/api/auth/callback') || url.includes('/api/auth/signin')) {
-          return `${baseUrl}/overview`;
+      const fallback = `${baseUrl}/overview`;
+      try {
+        const target = new URL(url, baseUrl);
+        if (target.origin !== new URL(baseUrl).origin) {
+          return fallback;
         }
-        return url;
+        if (
+          target.pathname.startsWith('/api/auth/callback') ||
+          target.pathname.startsWith('/api/auth/signin')
+        ) {
+          return fallback;
+        }
+        return target.toString();
+      } catch {
+        return fallback;
       }
-      // Allow relative callback URLs
-      if (url.startsWith('/')) {
-        return `${baseUrl}${url}`;
-      }
-      // Default to overview page for any other case
-      return `${baseUrl}/overview`;
     },
     async jwt({ token, account }) {
       // Initial sign in - store Keycloak tokens in JWT
       if (account) {
+        if (entraConfiguration) {
+          if (!account.access_token || !account.refresh_token) {
+            throw new Error('Entra did not issue the required access and refresh tokens');
+          }
+          const permissions = await verifyEntraAccessToken(
+            account.access_token,
+            entraConfiguration,
+          );
+          return {
+            ...token,
+            ...permissions,
+            authProvider: 'entra',
+            accessToken: account.access_token,
+            idToken: account.id_token,
+            refreshToken: account.refresh_token,
+            entraLogoutUrl: entraLogoutUrl(entraConfiguration),
+          };
+        }
         token.accessToken = account.access_token;
         token.idToken = account.id_token;
         token.refreshToken = account.refresh_token;
@@ -175,7 +224,7 @@ const authOptions: AuthOptions = {
 
         // Parse access token to get roles
         if (account.access_token) {
-          const accessTokenParsed = parseJwt(account.access_token as string);
+          const accessTokenParsed = parseJwt(account.access_token);
           // Extract client roles from resource_access
           token.roles = accessTokenParsed.resource_access?.[config.keycloakClientId!]?.roles || [];
           // Extract tenant_id
@@ -184,9 +233,13 @@ const authOptions: AuthOptions = {
         return token;
       }
 
+      if (entraConfiguration && token.authProvider !== 'entra') {
+        return { sub: token.sub, error: 'RefreshAccessTokenError' };
+      }
+
       // Return previous token if the access token has not expired yet
       // Add a 60 second buffer to refresh before actual expiration
-      if (Date.now() < (token.accessTokenExpires as number) - 60000) {
+      if (Date.now() < (token.accessTokenExpires || 0) - 60000) {
         return token;
       }
 
@@ -200,14 +253,15 @@ const authOptions: AuthOptions = {
         // client. Without it every user collapses onto the same fallback id, which
         // makes anything keyed on identity (per-user modals, preferences) behave as
         // though it were deployment-wide.
-        (session.user as any).sub = token.sub;
-        (session.user as any).roles = token.roles;
-        (session.user as any).tenantId = token.tenantId;
+        session.user.sub = token.sub;
+        session.user.roles = token.roles;
+        session.user.tenantId = token.tenantId;
       }
-      (session as any).accessToken = token.accessToken;
-      (session as any).idToken = token.idToken;
-      (session as any).keycloakLogoutUrl = token.keycloakLogoutUrl;
-      (session as any).error = token.error;
+      session.accessToken = token.accessToken;
+      session.idToken = token.idToken;
+      session.keycloakLogoutUrl = token.keycloakLogoutUrl;
+      session.entraLogoutUrl = token.entraLogoutUrl;
+      session.error = token.error;
       return session;
     },
   },

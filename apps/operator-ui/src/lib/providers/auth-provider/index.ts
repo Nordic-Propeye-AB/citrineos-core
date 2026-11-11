@@ -4,14 +4,21 @@
 'use client';
 
 import { createGenericAuthProvider } from '@lib/providers/auth-provider/generic-auth-provider';
+import { createEntraAuthProvider } from '@lib/providers/auth-provider/entra-auth-provider';
 import { createKeycloakAuthProvider } from '@lib/providers/auth-provider/keycloak-auth-provider';
 import config from '@lib/utils/config';
 
 if (config.authProvider === 'keycloak') {
   console.log(`Keycloak Auth Provider configured`);
+} else if (config.authProvider === 'entra') {
+  console.log('Microsoft Entra ID Auth Provider configured');
 } else {
   console.log('Generic Auth Provider configured');
 }
 
 export const authProvider =
-  config.authProvider === 'keycloak' ? createKeycloakAuthProvider() : createGenericAuthProvider();
+  config.authProvider === 'entra'
+    ? createEntraAuthProvider()
+    : config.authProvider === 'keycloak'
+      ? createKeycloakAuthProvider()
+      : createGenericAuthProvider();
