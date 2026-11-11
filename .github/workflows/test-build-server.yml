@@ -16,6 +16,7 @@ jobs:
     outputs:
       server: ${{ steps.filter.outputs.server }}
       shared: ${{ steps.filter.outputs.shared }}
+      build-required: ${{ steps.filter.outputs.server == 'true' || steps.filter.outputs.shared == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -35,7 +36,7 @@ jobs:
 
   build:
     needs: changes
-    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.shared == 'true' }}
+    if: ${{ needs.changes.outputs.build-required == 'true' }}
     strategy:
       matrix:
         os: [ubuntu-latest]
@@ -70,8 +71,12 @@ jobs:
           RETRY_DELAY=10
           until [ $RETRY_COUNT -ge $MAX_RETRIES ]
           do
-            newman run ${{ github.workspace }}/.github/workflows/tests/CI/collection.json -e ${{ github.workspace }}/.github/workflows/tests/CI/environment.json --reporters cli && break
+            newman run ${{ github.workspace }}/.github/workflows/tests/CI/collection.json -e ${{ github.workspace }}/.github/workflows/tests/CI/environment.json --reporters cli && exit 0
             RETRY_COUNT=$((RETRY_COUNT+1))
+            if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+              echo "Integration tests failed after $MAX_RETRIES attempts." >&2
+              exit 1
+            fi
             echo "Retry $RETRY_COUNT/$MAX_RETRIES in $RETRY_DELAY seconds..."
             sleep $RETRY_DELAY
           done
@@ -84,4 +89,30 @@ jobs:
           docker container ls -aq | xargs -I {} docker logs {}
 
       - name: Clean up
+        if: always()
         run: docker compose -f ${{ github.workspace }}/docker-compose.yml -f ${{ github.workspace }}/docker-compose.local.yml down
+
+  server-integration-ci:
+    name: Server Integration CI
+    needs: [changes, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check integration results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          BUILD_REQUIRED: ${{ needs.changes.outputs.build-required }}
+        run: |
+          node <<'NODE'
+          const results = JSON.parse(process.env.RESULTS);
+          const expected = {
+            changes: 'success',
+            build: process.env.BUILD_REQUIRED === 'true' ? 'success' : 'skipped',
+          };
+          for (const [job, result] of Object.entries(expected)) {
+            if (results[job]?.result !== result) {
+              console.error(`${job}: expected ${result}, received ${results[job]?.result}`);
+              process.exitCode = 1;
+            }
+          }
+          NODE

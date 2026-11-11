@@ -5,9 +5,16 @@ name: Push Release Tagged Server
 
 on:
   push:
+    branches:
+      - deployment
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+concurrency:
+  group: publish-citrineos-server
+  queue: max
+  cancel-in-progress: false
 
 jobs:
   build-and-push:
@@ -26,6 +33,35 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
+      - name: Check package visibility and latest revision
+        id: publish
+        uses: actions/github-script@v9
+        env:
+          IMAGE_NAME: ${{ matrix.image.name }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            try {
+              const { data } = await github.rest.packages.getPackageForOrganization({
+                org: owner,
+                package_type: 'container',
+                package_name: process.env.IMAGE_NAME,
+              });
+              if (data.visibility !== 'private') {
+                throw new Error(`Package ${process.env.IMAGE_NAME} must be private.`);
+              }
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+            let latest = true;
+            if (context.ref === 'refs/heads/deployment') {
+              const { data } = await github.rest.repos.getBranch({ owner, repo, branch: 'deployment' });
+              latest = data.commit.sha === context.sha;
+            }
+            core.setOutput('latest', String(latest));
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -52,22 +88,51 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
+          flavor: latest=false
           tags: |
             type=ref,event=tag
-            type=raw,value=latest
+            type=raw,value=${{ github.sha }},enable=${{ github.ref == 'refs/heads/deployment' }}
+            type=raw,value=latest,enable=${{ steps.publish.outputs.latest == 'true' }}
 
       - name: Build and push server image
+        id: build
         if: ${{ matrix.image.name == 'citrineos-server' }}
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Verify private package and summarize publication
+        uses: actions/github-script@v9
+        env:
+          IMAGE_NAME: ${{ matrix.image.name }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        with:
+          script: |
+            const { data } = await github.rest.packages.getPackageForOrganization({
+              org: context.repo.owner,
+              package_type: 'container',
+              package_name: process.env.IMAGE_NAME,
+            });
+            if (data.visibility !== 'private') {
+              throw new Error(`Package ${process.env.IMAGE_NAME} must be private.`);
+            }
+            await core.summary
+              .addHeading(`Published ${process.env.IMAGE_NAME}`)
+              .addCodeBlock(process.env.IMAGE_TAGS)
+              .addTable([
+                [{ data: 'Commit', header: true }, context.sha],
+                [{ data: 'Digest', header: true }, process.env.IMAGE_DIGEST],
+                [{ data: 'Visibility', header: true }, data.visibility],
+              ])
+              .write();
 
       # Move cache to avoid ever-growing cache
       - name: Move cache
