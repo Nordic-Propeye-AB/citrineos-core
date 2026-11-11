@@ -20,6 +20,8 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       operator-ui: ${{ steps.filter.outputs.operator-ui }}
       shared: ${{ steps.filter.outputs.shared }}
+      tests-required: ${{ github.base_ref == 'deployment' || steps.filter.outputs.base == 'true' || steps.filter.outputs.dal == 'true' || steps.filter.outputs.ocpp == 'true' || steps.filter.outputs.server == 'true' || steps.filter.outputs.shared == 'true' }}
+      operator-ui-required: ${{ steps.filter.outputs.operator-ui == 'true' || steps.filter.outputs.shared == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -54,7 +56,7 @@ jobs:
 
   tests:
     needs: changes
-    if: ${{ needs.changes.outputs.base == 'true' || needs.changes.outputs.dal == 'true' || needs.changes.outputs.ocpp == 'true' || needs.changes.outputs.server == 'true' || needs.changes.outputs.shared == 'true' }}
+    if: ${{ needs.changes.outputs.tests-required == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -78,6 +80,10 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Typecheck tests
+        if: github.base_ref == 'deployment'
+        run: pnpm typecheck:test
+
       - name: Run tests
         env:
           NODE_OPTIONS: '--max_old_space_size=4096'
@@ -96,7 +102,7 @@ jobs:
 
   operator-ui-e2e:
     needs: changes
-    if: ${{ needs.changes.outputs.operator-ui == 'true' || needs.changes.outputs.shared == 'true' }}
+    if: ${{ needs.changes.outputs.operator-ui-required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -213,9 +219,37 @@ jobs:
         if: always()
         run: docker compose -f ${{ github.workspace }}/docker-compose.yml -f ${{ github.workspace }}/docker-compose.local.yml down -v
 
+  tests-ci:
+    name: Tests CI
+    needs: [changes, tests, operator-ui-e2e, operator-ui-e2e-everest]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check test results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          TESTS_REQUIRED: ${{ needs.changes.outputs.tests-required }}
+          OPERATOR_UI_REQUIRED: ${{ needs.changes.outputs.operator-ui-required }}
+        run: |
+          node <<'NODE'
+          const results = JSON.parse(process.env.RESULTS);
+          const expected = {
+            changes: 'success',
+            tests: process.env.TESTS_REQUIRED === 'true' ? 'success' : 'skipped',
+            'operator-ui-e2e': process.env.OPERATOR_UI_REQUIRED === 'true' ? 'success' : 'skipped',
+            'operator-ui-e2e-everest': process.env.OPERATOR_UI_REQUIRED === 'true' ? 'success' : 'skipped',
+          };
+          for (const [job, result] of Object.entries(expected)) {
+            if (results[job]?.result !== result) {
+              console.error(`${job}: expected ${result}, received ${results[job]?.result}`);
+              process.exitCode = 1;
+            }
+          }
+          NODE
+
   operator-ui-e2e-everest:
     needs: changes
-    if: ${{ needs.changes.outputs.operator-ui == 'true' || needs.changes.outputs.shared == 'true' }}
+    if: ${{ needs.changes.outputs.operator-ui-required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
 
